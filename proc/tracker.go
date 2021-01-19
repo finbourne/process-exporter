@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	common "github.com/finbourne/process-exporter"
 	seq "github.com/ncabatoff/go-seq/seq"
-	common "github.com/ncabatoff/process-exporter"
 )
 
 type (

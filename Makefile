@@ -2,7 +2,7 @@ pkgs          = $(shell go list ./...)
 
 PREFIX                  ?= $(shell pwd)
 BIN_DIR                 ?= $(shell pwd)
-DOCKER_IMAGE_NAME       ?= ncabatoff/process-exporter
+DOCKER_IMAGE_NAME       ?= finbourne/process-exporter
 
 BRANCH      ?= $(shell git rev-parse --abbrev-ref HEAD)
 BUILDDATE   ?= $(shell date --iso-8601=seconds)
@@ -58,16 +58,16 @@ install:
 docker:
 	@echo ">> building docker image"
 	docker build -t "$(DOCKER_IMAGE_NAME):$(TAG_VERSION)" .
-	docker rm configs
+	docker rm configs || true
 	docker create -v /packaging --name configs alpine:3.4 /bin/true
 	docker cp packaging/conf configs:/packaging/conf
 	docker run --rm --volumes-from configs "$(DOCKER_IMAGE_NAME):$(TAG_VERSION)" $(SMOKE_TEST)
 
 dockertest:
-	docker run --rm -it -v `pwd`:/go/src/github.com/ncabatoff/process-exporter golang:1.15  make -C /go/src/github.com/ncabatoff/process-exporter test
+	docker run --rm -it -v `pwd`:/go/src/github.com/finbourne/process-exporter golang:1.15  make -C /go/src/github.com/finbourne/process-exporter test
 
 dockerinteg:
-	docker run --rm -it -v `pwd`:/go/src/github.com/ncabatoff/process-exporter golang:1.15  make -C /go/src/github.com/ncabatoff/process-exporter build integ
+	docker run --rm -it -v `pwd`:/go/src/github.com/finbourne/process-exporter golang:1.15  make -C /go/src/github.com/finbourne/process-exporter build integ
 
 .PHONY: update-go-deps
 update-go-deps:

@@ -100,15 +100,15 @@ func TestTrackerMetrics(t *testing.T) {
 	}{
 		{
 			piinfost(p, n, Counts{1, 2, 3, 4, 5, 6, 0, 0}, Memory{7, 8, 0, 0, 0},
-				Filedesc{1, 10}, 9, States{Sleeping: 1}),
-			Update{n, Delta{}, Memory{7, 8, 0, 0, 0}, Filedesc{1, 10}, tm,
+				Filedesc{FiledescOpenCounts{1, 1, 0, 0, 0, 0}, 10}, 9, States{Sleeping: 1}),
+			Update{n, Delta{}, Memory{7, 8, 0, 0, 0}, Filedesc{FiledescOpenCounts{1, 1, 0, 0, 0, 0}, 10}, tm,
 				9, States{Sleeping: 1}, msi{}, nil},
 		},
 		{
 			piinfost(p, n, Counts{2, 3, 4, 5, 6, 7, 0, 0}, Memory{1, 2, 0, 0, 0},
-				Filedesc{2, 20}, 1, States{Running: 1}),
+				Filedesc{FiledescOpenCounts{2, 1, 1, 0, 0, 0}, 20}, 1, States{Running: 1}),
 			Update{n, Delta{1, 1, 1, 1, 1, 1, 0, 0}, Memory{1, 2, 0, 0, 0},
-				Filedesc{2, 20}, tm, 1, States{Running: 1}, msi{}, nil},
+				Filedesc{FiledescOpenCounts{2, 1, 1, 0, 0, 0}, 20}, tm, 1, States{Running: 1}, msi{}, nil},
 		},
 	}
 	tr := NewTracker(newNamer(n), false, false, false, false)
@@ -130,26 +130,26 @@ func TestTrackerThreads(t *testing.T) {
 		want Update
 	}{
 		{
-			piinfo(p, n, Counts{}, Memory{}, Filedesc{1, 1}, 1),
-			Update{n, Delta{}, Memory{}, Filedesc{1, 1}, tm, 1, States{}, msi{}, nil},
+			piinfo(p, n, Counts{}, Memory{}, Filedesc{FiledescOpenCounts{1, 1, 0, 0, 0, 0}, 1}, 1),
+			Update{n, Delta{}, Memory{}, Filedesc{FiledescOpenCounts{1, 1, 0, 0, 0, 0}, 1}, tm, 1, States{}, msi{}, nil},
 		}, {
-			piinfot(p, n, Counts{}, Memory{}, Filedesc{1, 1}, []Thread{
+			piinfot(p, n, Counts{}, Memory{}, Filedesc{FiledescOpenCounts{1, 1, 0, 0, 0, 0}, 1}, []Thread{
 				{ThreadID(ID{p, 0}), "t1", Counts{1, 2, 3, 4, 5, 6, 0, 0}, "", States{}},
 				{ThreadID(ID{p + 1, 0}), "t2", Counts{1, 1, 1, 1, 1, 1, 0, 0}, "", States{}},
 			}),
-			Update{n, Delta{}, Memory{}, Filedesc{1, 1}, tm, 2, States{}, msi{},
+			Update{n, Delta{}, Memory{}, Filedesc{FiledescOpenCounts{1, 1, 0, 0, 0, 0}, 1}, tm, 2, States{}, msi{},
 				[]ThreadUpdate{
 					{"t1", Delta{}},
 					{"t2", Delta{}},
 				},
 			},
 		}, {
-			piinfot(p, n, Counts{}, Memory{}, Filedesc{1, 1}, []Thread{
+			piinfot(p, n, Counts{}, Memory{}, Filedesc{FiledescOpenCounts{1, 1, 0, 0, 0, 0}, 1}, []Thread{
 				{ThreadID(ID{p, 0}), "t1", Counts{2, 3, 4, 5, 6, 7, 0, 0}, "", States{}},
 				{ThreadID(ID{p + 1, 0}), "t2", Counts{2, 2, 2, 2, 2, 2, 0, 0}, "", States{}},
 				{ThreadID(ID{p + 2, 0}), "t2", Counts{1, 1, 1, 1, 1, 1, 0, 0}, "", States{}},
 			}),
-			Update{n, Delta{}, Memory{}, Filedesc{1, 1}, tm, 3, States{}, msi{},
+			Update{n, Delta{}, Memory{}, Filedesc{FiledescOpenCounts{1, 1, 0, 0, 0, 0}, 1}, tm, 3, States{}, msi{},
 				[]ThreadUpdate{
 					{"t1", Delta{1, 1, 1, 1, 1, 1, 0, 0}},
 					{"t2", Delta{1, 1, 1, 1, 1, 1, 0, 0}},
@@ -157,11 +157,11 @@ func TestTrackerThreads(t *testing.T) {
 				},
 			},
 		}, {
-			piinfot(p, n, Counts{}, Memory{}, Filedesc{1, 1}, []Thread{
+			piinfot(p, n, Counts{}, Memory{}, Filedesc{FiledescOpenCounts{1, 1, 0, 0, 0, 0}, 1}, []Thread{
 				{ThreadID(ID{p, 0}), "t1", Counts{2, 3, 4, 5, 6, 7, 0, 0}, "", States{}},
 				{ThreadID(ID{p + 2, 0}), "t2", Counts{1, 2, 3, 4, 5, 6, 0, 0}, "", States{}},
 			}),
-			Update{n, Delta{}, Memory{}, Filedesc{1, 1}, tm, 2, States{}, msi{},
+			Update{n, Delta{}, Memory{}, Filedesc{FiledescOpenCounts{1, 1, 0, 0, 0, 0}, 1}, tm, 2, States{}, msi{},
 				[]ThreadUpdate{
 					{"t1", Delta{}},
 					{"t2", Delta{0, 1, 2, 3, 4, 5, 0, 0}},
