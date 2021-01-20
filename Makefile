@@ -58,7 +58,7 @@ install:
 docker:
 	@echo ">> building docker image"
 	docker build -t "$(DOCKER_IMAGE_NAME):$(TAG_VERSION)" .
-	docker rm configs
+	docker rm configs || true
 	docker create -v /packaging --name configs alpine:3.4 /bin/true
 	docker cp packaging/conf configs:/packaging/conf
 	docker run --rm --volumes-from configs "$(DOCKER_IMAGE_NAME):$(TAG_VERSION)" $(SMOKE_TEST)

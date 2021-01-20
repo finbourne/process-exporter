@@ -28,8 +28,8 @@ func procInfoIter(ps ...IDInfo) *procIterator {
 	return &procIterator{procs: procIDInfos(ps), idx: -1}
 }
 
-func allprocs(procpath string) Iter {
-	fs, err := NewFS(procpath, false)
+func allprocs(procpath string, gatherSMaps, categoriseFDs bool) Iter {
+	fs, err := NewFS(procpath, gatherSMaps, categoriseFDs, false)
 	if err != nil {
 		cwd, _ := os.Getwd()
 		panic("can't read " + procpath + ", cwd=" + cwd + ", err=" + fmt.Sprintf("%v", err))
@@ -38,7 +38,7 @@ func allprocs(procpath string) Iter {
 }
 
 func TestReadFixture(t *testing.T) {
-	procs := allprocs("../fixtures")
+	procs := allprocs("../fixtures", false, false) // The categorised FD counts cannot be tested via the fixture, as this requires "special" symlinks only provided by the proc filesystem
 	var pii IDInfo
 
 	count := 0
@@ -88,7 +88,7 @@ func TestReadFixture(t *testing.T) {
 			VmSwapBytes:   0x2800,
 		},
 		Filedesc: Filedesc{
-			Open:  5,
+			Open:  FiledescOpenCounts{5, -1, -1, -1, -1, -1}, // Categorised FDs not available
 			Limit: 0x400,
 		},
 		NumThreads: 7,
@@ -107,7 +107,7 @@ func noerr(t *testing.T, err error) {
 
 // Basic test of proc reading: does AllProcs return at least two procs, one of which is us.
 func TestAllProcs(t *testing.T) {
-	procs := allprocs("/proc")
+	procs := allprocs("/proc", true, true)
 	count := 0
 	for procs.Next() {
 		count++
@@ -141,6 +141,36 @@ func TestAllProcs(t *testing.T) {
 		if len(threads) < 2 {
 			t.Errorf("got %d thread details, want >1", len(threads))
 		}
+
+		if metrics.Filedesc.Open.Sum < 3 { // expect stdin, stdout, stderr
+			t.Errorf("got %d file descriptors, want >=3", metrics.Filedesc.Open.Sum)
+		}
+
+		if metrics.Filedesc.Open.Files < 0 { // expect no errors reading file FDs
+			t.Errorf("got %d file file descriptors, want >=0", metrics.Filedesc.Open.Files)
+		}
+
+		if metrics.Filedesc.Open.Sockets < 0 { // expect no errors reading socket FDs
+			t.Errorf("got %d socket file descriptors, want >=0", metrics.Filedesc.Open.Sockets)
+		}
+
+		if metrics.Filedesc.Open.Pipes < 0 { // expect no errors reading pipe FDs
+			t.Errorf("got %d pipe file descriptors, want >=0", metrics.Filedesc.Open.Pipes)
+		}
+
+		if metrics.Filedesc.Open.AnonInodes < 0 { // expect no errors reading anon-inode FDs
+			t.Errorf("got %d anon-inode file descriptors, want >=0", metrics.Filedesc.Open.AnonInodes)
+		}
+
+		if metrics.Filedesc.Open.Unknown != 0 { // expect no unknown FDs
+			t.Errorf("got %d unknown file descriptors, want 0", metrics.Filedesc.Open.Unknown)
+		}
+
+		// Expect that the sum of FDs is the sum of all FD categories
+		categorisedSum := metrics.Filedesc.Open.Files + metrics.Filedesc.Open.Sockets + metrics.Filedesc.Open.Pipes + metrics.Filedesc.Open.AnonInodes + metrics.Open.Unknown
+		if metrics.Filedesc.Open.Sum != categorisedSum {
+			t.Errorf("got %d file descriptors of all types, want %d", categorisedSum, metrics.Filedesc.Open.Sum)
+		}
 	}
 	err := procs.Close()
 	noerr(t, err)
@@ -154,7 +184,7 @@ func TestAllProcs(t *testing.T) {
 func TestAllProcsSpawn(t *testing.T) {
 	childprocs := func() []IDInfo {
 		found := []IDInfo{}
-		procs := allprocs("/proc")
+		procs := allprocs("/proc", true, true)
 		mypid := os.Getpid()
 		for procs.Next() {
 			procid, err := procs.GetProcID()

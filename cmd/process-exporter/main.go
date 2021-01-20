@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ncabatoff/fakescraper"
 	common "github.com/ncabatoff/process-exporter"
 	"github.com/ncabatoff/process-exporter/config"
 	"github.com/ncabatoff/process-exporter/proc"
+	"github.com/ncabatoff/fakescraper"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	promVersion "github.com/prometheus/common/version"
@@ -121,11 +121,7 @@ var (
 		[]string{"groupname", "memtype"},
 		nil)
 
-	openFDsDesc = prometheus.NewDesc(
-		"namedprocess_namegroup_open_filedesc",
-		"number of open file descriptors for this group",
-		[]string{"groupname"},
-		nil)
+	openFDsDesc *prometheus.Desc
 
 	worstFDRatioDesc = prometheus.NewDesc(
 		"namedprocess_namegroup_worst_fd_ratio",
@@ -302,6 +298,8 @@ func main() {
 			"report on per-threadname metrics as well")
 		smaps = flag.Bool("gather-smaps", true,
 			"gather metrics from smaps file, which contains proportional resident memory size")
+		categoriseFDs = flag.Bool("categorise-fds", true,
+			"create separate counts for each type of file descriptor (files, sockets, pipes and anonymous inodes)")
 		man = flag.Bool("man", false,
 			"print manual")
 		configPath = flag.String("config.path", "",
@@ -323,6 +321,20 @@ func main() {
 	if *man {
 		printManual()
 		return
+	}
+
+	if *categoriseFDs {
+		openFDsDesc = prometheus.NewDesc(
+			"namedprocess_namegroup_open_filedesc",
+			"number of open file descriptors of each type for this group",
+			[]string{"groupname", "fdtype"},
+			nil)
+	} else {
+		openFDsDesc = prometheus.NewDesc(
+			"namedprocess_namegroup_open_filedesc",
+			"number of open file descriptors for this group",
+			[]string{"groupname"},
+			nil)
 	}
 
 	var matchnamer common.MatchNamer
@@ -366,13 +378,14 @@ func main() {
 
 	pc, err := NewProcessCollector(
 		ProcessCollectorOption{
-			ProcFSPath:  *procfsPath,
-			Children:    *children,
-			Threads:     *threads,
-			GatherSMaps: *smaps,
-			Namer:       matchnamer,
-			Recheck:     *recheck,
-			Debug:       *debug,
+			ProcFSPath:    *procfsPath,
+			Children:      *children,
+			Threads:       *threads,
+			GatherSMaps:   *smaps,
+			CategoriseFDs: *categoriseFDs,
+			Namer:         matchnamer,
+			Recheck:       *recheck,
+			Debug:         *debug,
 		},
 	)
 	if err != nil {
@@ -415,13 +428,14 @@ type (
 	}
 
 	ProcessCollectorOption struct {
-		ProcFSPath  string
-		Children    bool
-		Threads     bool
-		GatherSMaps bool
-		Namer       common.MatchNamer
-		Recheck     bool
-		Debug       bool
+		ProcFSPath    string
+		Children      bool
+		Threads       bool
+		GatherSMaps   bool
+		CategoriseFDs bool
+		Namer         common.MatchNamer
+		Recheck       bool
+		Debug         bool
 	}
 
 	NamedProcessCollector struct {
@@ -429,6 +443,7 @@ type (
 		*proc.Grouper
 		threads              bool
 		smaps                bool
+		categoriseFDs        bool
 		source               proc.Source
 		scrapeErrors         int
 		scrapeProcReadErrors int
@@ -438,19 +453,19 @@ type (
 )
 
 func NewProcessCollector(options ProcessCollectorOption) (*NamedProcessCollector, error) {
-	fs, err := proc.NewFS(options.ProcFSPath, options.Debug)
+	fs, err := proc.NewFS(options.ProcFSPath, options.GatherSMaps, options.CategoriseFDs, options.Debug)
 	if err != nil {
 		return nil, err
 	}
 
-	fs.GatherSMaps = options.GatherSMaps
 	p := &NamedProcessCollector{
-		scrapeChan: make(chan scrapeRequest),
-		Grouper:    proc.NewGrouper(options.Namer, options.Children, options.Threads, options.Recheck, options.Debug),
-		source:     fs,
-		threads:    options.Threads,
-		smaps:      options.GatherSMaps,
-		debug:      options.Debug,
+		scrapeChan:    make(chan scrapeRequest),
+		Grouper:       proc.NewGrouper(options.Namer, options.Children, options.Threads, options.Recheck, options.Debug),
+		source:        fs,
+		threads:       options.Threads,
+		categoriseFDs: options.CategoriseFDs,
+		smaps:         options.GatherSMaps,
+		debug:         options.Debug,
 	}
 
 	colErrs, _, err := p.Update(p.source.AllProcs())
@@ -528,8 +543,6 @@ func (p *NamedProcessCollector) scrape(ch chan<- prometheus.Metric) {
 				prometheus.GaugeValue, float64(gcounts.Memory.VmSwapBytes), gname, "swapped")
 			ch <- prometheus.MustNewConstMetric(startTimeDesc,
 				prometheus.GaugeValue, float64(gcounts.OldestStartTime.Unix()), gname)
-			ch <- prometheus.MustNewConstMetric(openFDsDesc,
-				prometheus.GaugeValue, float64(gcounts.OpenFDs), gname)
 			ch <- prometheus.MustNewConstMetric(worstFDRatioDesc,
 				prometheus.GaugeValue, float64(gcounts.WorstFDratio), gname)
 			ch <- prometheus.MustNewConstMetric(cpuSecsDesc,
@@ -564,6 +577,22 @@ func (p *NamedProcessCollector) scrape(ch chan<- prometheus.Metric) {
 			for wchan, count := range gcounts.Wchans {
 				ch <- prometheus.MustNewConstMetric(threadWchanDesc,
 					prometheus.GaugeValue, float64(count), gname, wchan)
+			}
+
+			if p.categoriseFDs {
+				ch <- prometheus.MustNewConstMetric(openFDsDesc,
+					prometheus.GaugeValue, float64(gcounts.OpenFDs.Files), gname, "file")
+				ch <- prometheus.MustNewConstMetric(openFDsDesc,
+					prometheus.GaugeValue, float64(gcounts.OpenFDs.Sockets), gname, "socket")
+				ch <- prometheus.MustNewConstMetric(openFDsDesc,
+					prometheus.GaugeValue, float64(gcounts.OpenFDs.Pipes), gname, "pipe")
+				ch <- prometheus.MustNewConstMetric(openFDsDesc,
+					prometheus.GaugeValue, float64(gcounts.OpenFDs.AnonInodes), gname, "anon_inode")
+				ch <- prometheus.MustNewConstMetric(openFDsDesc,
+					prometheus.GaugeValue, float64(gcounts.OpenFDs.Unknown), gname, "unknown")
+			} else {
+				ch <- prometheus.MustNewConstMetric(openFDsDesc,
+					prometheus.GaugeValue, float64(gcounts.OpenFDs.Sum), gname)
 			}
 
 			if p.smaps {

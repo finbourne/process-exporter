@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/procfs"
@@ -56,10 +57,27 @@ type (
 		ProportionalSwapBytes uint64
 	}
 
+	// FiledescOpenCounts describes the number of open file descriptors
+	// of each type plus the total across all types
+	FiledescOpenCounts struct {
+		// Sum is the count of open file descriptors of all types, -1 if unknown.
+		Sum int64
+		// Files is the count of open file descriptors referrring to files, -1 if unknown.
+		Files int64
+		// Sockets is the count of open file descriptors referrring to sockets, -1 if unknown.
+		Sockets int64
+		// Pipes is the count of open file descriptors referrring to pipes, -1 if unknown.
+		Pipes int64
+		// AnonInodes is the count of open file descriptors referrring to anonymous inodes, -1 if unknown.
+		AnonInodes int64
+		// Unknown is the count of open file descriptors referrring to an unknown type, -1 if unknown.
+		Unknown int64
+	}
+
 	// Filedesc describes a proc's file descriptor usage and soft limit.
 	Filedesc struct {
-		// Open is the count of open file descriptors, -1 if unknown.
-		Open int64
+		// Open contains the open file descriptor counts by category
+		Open FiledescOpenCounts
 		// Limit is the fd soft limit for the process.
 		Limit uint64
 	}
@@ -189,10 +207,11 @@ type (
 	// FS implements Source.
 	FS struct {
 		procfs.FS
-		BootTime    uint64
-		MountPoint  string
-		GatherSMaps bool
-		debug       bool
+		BootTime      uint64
+		MountPoint    string
+		GatherSMaps   bool
+		CategoriseFDs bool
+		debug         bool
 	}
 )
 
@@ -461,15 +480,45 @@ func (p proc) GetMetrics() (Metrics, int, error) {
 	// Ditto for status
 	status, _ := p.getStatus()
 
-	numfds, err := p.Proc.FileDescriptorsLen()
-	if err != nil {
-		numfds = -1
-		softerrors |= 1
-	}
-
 	limits, err := p.Proc.NewLimits()
 	if err != nil {
 		return Metrics{}, 0, err
+	}
+
+	numfds, numFiles, numSockets, numPipes, numAnonInodes, numUnknown := -1, -1, -1, -1, -1, -1
+	{
+		var err error
+		if p.proccache.fs.CategoriseFDs {
+			var targets []string
+			targets, err = p.Proc.FileDescriptorTargets()
+			if err == nil {
+				numFiles, numSockets, numPipes, numAnonInodes, numUnknown = p.sumFileDescriptorsByType(targets)
+
+				// Sum of all categories. This is different from the len() of the targets slice since the procfs package
+				// returns an empty string in the slice when it encounters an error reading the symlink (e.g. file closed
+				// between reading the directory listing and reading the symlink, causing a ENOENT)
+				numfds = numFiles + numSockets + numPipes + numAnonInodes + numUnknown
+			}
+		} else {
+			numfds, err = p.Proc.FileDescriptorsLen()
+		}
+
+		if err != nil {
+			numfds = -1
+			softerrors |= 1
+		}
+	}
+
+	fileDesc := Filedesc{
+		Open: FiledescOpenCounts{
+			Sum:        int64(numfds),
+			Files:      int64(numFiles),
+			Sockets:    int64(numSockets),
+			Pipes:      int64(numPipes),
+			AnonInodes: int64(numAnonInodes),
+			Unknown:    int64(numUnknown),
+		},
+		Limit: uint64(limits.OpenFiles),
 	}
 
 	wchan, err := p.getWchan()
@@ -494,12 +543,9 @@ func (p proc) GetMetrics() (Metrics, int, error) {
 	}
 
 	return Metrics{
-		Counts: counts,
-		Memory: memory,
-		Filedesc: Filedesc{
-			Open:  int64(numfds),
-			Limit: uint64(limits.OpenFiles),
-		},
+		Counts:     counts,
+		Memory:     memory,
+		Filedesc:   fileDesc,
 		NumThreads: uint64(stat.NumThreads),
 		States:     states,
 		Wchan:      wchan,
@@ -555,12 +601,36 @@ func (p proc) GetThreads() ([]Thread, error) {
 	return threads, nil
 }
 
+func (p proc) sumFileDescriptorsByType(targets []string) (numFiles, numSockets, numPipes, numAnonInodes, numUnknown int) {
+	for _, target := range targets {
+		switch {
+		// The special /proc filesystem symlink strings have been observed in both quoted and unquoted forms,
+		// so use strings.Index() instead of strings.HasPrefix()
+		case strings.Index(target, "socket:") != -1:
+			numSockets++
+		case strings.Index(target, "pipe:") != -1:
+			numPipes++
+		case strings.Index(target, "anon_inode:") != -1:
+			numAnonInodes++
+		case strings.HasPrefix(target, "/"):
+			numFiles++
+		case target == "":
+			// This indicates that the procfs library could not read the symlink due to an error, dont count it
+		default:
+			// A indeterminable type of FD. Perhaps newly added to the kernel?
+			numUnknown++
+		}
+	}
+
+	return
+}
+
 // See https://github.com/prometheus/procfs/blob/master/proc_stat.go for details on userHZ.
 const userHZ = 100
 
 // NewFS returns a new FS mounted under the given mountPoint. It will error
 // if the mount point can't be read.
-func NewFS(mountPoint string, debug bool) (*FS, error) {
+func NewFS(mountPoint string, gatherSMaps, categoriseFDs, debug bool) (*FS, error) {
 	fs, err := procfs.NewFS(mountPoint)
 	if err != nil {
 		return nil, err
@@ -569,7 +639,7 @@ func NewFS(mountPoint string, debug bool) (*FS, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &FS{fs, stat.BootTime, mountPoint, false, debug}, nil
+	return &FS{fs, stat.BootTime, mountPoint, gatherSMaps, categoriseFDs, debug}, nil
 }
 
 func (fs *FS) threadFs(pid int) (*FS, error) {
@@ -578,7 +648,7 @@ func (fs *FS) threadFs(pid int) (*FS, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &FS{tfs, fs.BootTime, mountPoint, fs.GatherSMaps, false}, nil
+	return &FS{tfs, fs.BootTime, mountPoint, fs.GatherSMaps, fs.CategoriseFDs, false}, nil
 }
 
 // AllProcs implements Source.

@@ -3,8 +3,8 @@ package proc
 import (
 	"time"
 
-	seq "github.com/ncabatoff/go-seq/seq"
 	common "github.com/ncabatoff/process-exporter"
+	seq "github.com/ncabatoff/go-seq/seq"
 )
 
 type (
@@ -29,6 +29,21 @@ type (
 		Counts
 	}
 
+	GroupFiledescOpenCounts struct {
+		// Sum is the count of open file descriptors of all types.
+		Sum uint64
+		// Files is the count of open file descriptors referrring to files.
+		Files uint64
+		// Sockets is the count of open file descriptors referrring to sockets.
+		Sockets uint64
+		// Pipes is the count of open file descriptors referrring to pipes.
+		Pipes uint64
+		// AnonInodes is the count of open file descriptors referrring to anonymous inodes.
+		AnonInodes uint64
+		// Unknown is the count of open file descriptors referrring to an unknown type.
+		Unknown uint64
+	}
+
 	// Group describes the metrics of a single group.
 	Group struct {
 		Counts
@@ -37,7 +52,7 @@ type (
 		Procs  int
 		Memory
 		OldestStartTime time.Time
-		OpenFDs         uint64
+		OpenFDs         GroupFiledescOpenCounts
 		WorstFDratio    float64
 		NumThreads      uint64
 		Threads         []Threads
@@ -68,13 +83,35 @@ func groupadd(grp Group, ts Update) Group {
 	grp.Memory.VmSwapBytes += ts.Memory.VmSwapBytes
 	grp.Memory.ProportionalBytes += ts.Memory.ProportionalBytes
 	grp.Memory.ProportionalSwapBytes += ts.Memory.ProportionalSwapBytes
-	if ts.Filedesc.Open != -1 {
-		grp.OpenFDs += uint64(ts.Filedesc.Open)
+	if ts.Filedesc.Open.Sum != -1 {
+		grp.OpenFDs.Sum += uint64(ts.Filedesc.Open.Sum)
+		openratio := float64(ts.Filedesc.Open.Sum) / float64(ts.Filedesc.Limit)
+		if grp.WorstFDratio < openratio {
+			grp.WorstFDratio = openratio
+		}
+
+		// These values will be > -1 if 'categorise FDs' is enabled
+		if ts.Filedesc.Open.Files != -1 {
+			grp.OpenFDs.Files += uint64(ts.Filedesc.Open.Files)
+		}
+
+		if ts.Filedesc.Open.Sockets != -1 {
+			grp.OpenFDs.Sockets += uint64(ts.Filedesc.Open.Sockets)
+		}
+
+		if ts.Filedesc.Open.Pipes != -1 {
+			grp.OpenFDs.Pipes += uint64(ts.Filedesc.Open.Pipes)
+		}
+
+		if ts.Filedesc.Open.AnonInodes != -1 {
+			grp.OpenFDs.AnonInodes += uint64(ts.Filedesc.Open.AnonInodes)
+		}
+
+		if ts.Filedesc.Open.Unknown != -1 {
+			grp.OpenFDs.AnonInodes += uint64(ts.Filedesc.Open.Unknown)
+		}
 	}
-	openratio := float64(ts.Filedesc.Open) / float64(ts.Filedesc.Limit)
-	if grp.WorstFDratio < openratio {
-		grp.WorstFDratio = openratio
-	}
+
 	grp.NumThreads += ts.NumThreads
 	grp.Counts.Add(ts.Latest)
 	grp.States.Add(ts.States)
