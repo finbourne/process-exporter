@@ -1,7 +1,7 @@
 # Start from a Debian image with the latest version of Go installed
 # and a workspace (GOPATH) configured at /go.
 FROM golang:1.15 AS build
-WORKDIR /go/src/github.com/finbourne/process-exporter
+WORKDIR /go/src/github.com/ncabatoff/process-exporter
 ADD . .
 
 # Build the process-exporter command inside the container.
@@ -9,7 +9,7 @@ RUN make
 
 FROM scratch
 
-COPY --from=build /go/src/github.com/finbourne/process-exporter/process-exporter /bin/process-exporter
+COPY --from=build /go/src/github.com/ncabatoff/process-exporter/process-exporter /bin/process-exporter
 
 # Run the process-exporter command by default when the container starts.
 ENTRYPOINT ["/bin/process-exporter"]

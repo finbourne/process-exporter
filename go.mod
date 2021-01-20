@@ -1,4 +1,4 @@
-module github.com/finbourne/process-exporter
+module github.com/ncabatoff/process-exporter
 
 go 1.15
 

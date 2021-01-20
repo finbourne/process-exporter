@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	common "github.com/finbourne/process-exporter"
-	"github.com/finbourne/process-exporter/config"
-	"github.com/finbourne/process-exporter/proc"
+	common "github.com/ncabatoff/process-exporter"
+	"github.com/ncabatoff/process-exporter/config"
+	"github.com/ncabatoff/process-exporter/proc"
 	"github.com/ncabatoff/fakescraper"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"

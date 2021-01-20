@@ -3,7 +3,7 @@ package proc
 import (
 	"time"
 
-	common "github.com/finbourne/process-exporter"
+	common "github.com/ncabatoff/process-exporter"
 	seq "github.com/ncabatoff/go-seq/seq"
 )
 
