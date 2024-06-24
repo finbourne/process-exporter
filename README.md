@@ -1,3 +1,5 @@
+![LUSID_by_Finbourne](./resources/Finbourne_Logo_Teal.svg)
+
 # process-exporter
 Prometheus exporter that mines /proc to report on selected processes.
 
